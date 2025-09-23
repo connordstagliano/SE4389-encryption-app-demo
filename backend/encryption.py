@@ -5,11 +5,18 @@ encryption.py — TACO (Totally Amateur Credential Organizer) encryption helpers
 from __future__ import annotations
 
 import base64
+import hmac
+import json
 import os
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
+from cryptography.hazmat.primitives import hashes, hmac as crypto_hmac
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+
+VERSION = "taco-v1"
+HKDF_SALT = b"taco-v1-hkdf-salt"
 
 
 def _b64e(b: bytes) -> str:
@@ -83,3 +90,49 @@ def derive_root_key(password: str, kdf: KDFParams) -> bytes:
         p=kdf.p,
     )
     return kdf_fn.derive(password.encode("utf-8"))
+
+
+def derive_subkey(root_key: bytes, info: bytes, length: int = 32) -> bytes:
+    hkdf = HKDF(algorithm=hashes.SHA256(), length=length, salt=HKDF_SALT, info=info)
+    return hkdf.derive(root_key)
+
+
+def _hmac_sha256(key: bytes, msg: bytes) -> bytes:
+    h = crypto_hmac.HMAC(key, hashes.SHA256())
+    h.update(msg)
+    return h.finalize()
+
+
+def make_master_record(
+    username: str, password: str, kdf: Optional[KDFParams] = None
+) -> Dict[str, object]:
+    if not username:
+        raise ValueError("username required")
+    kdf = kdf or KDFParams.create()
+    root_key = derive_root_key(password, kdf)
+    auth_key = derive_subkey(root_key, b"auth-key")
+    verifier = _hmac_sha256(auth_key, f"verify|{username}|{VERSION}".encode("utf-8"))
+    return {
+        "version": VERSION,
+        "username": username,
+        "kdf": kdf.to_dict(),
+        "verifier": _b64e(verifier),
+    }
+
+
+def verify_master(
+    username: str, password: str, record: Dict[str, object]
+) -> Tuple[bool, Optional[bytes]]:
+    try:
+        if record.get("version") != VERSION or record.get("username") != username:
+            return False, None
+        kdf = KDFParams.from_dict(record["kdf"])  # type: ignore[arg-type]
+        root_key = derive_root_key(password, kdf)
+        auth_key = derive_subkey(root_key, b"auth-key")
+        expected = _b64d(str(record["verifier"]))  # type: ignore[index]
+        actual = _hmac_sha256(auth_key, f"verify|{username}|{VERSION}".encode("utf-8"))
+        if hmac.compare_digest(expected, actual):
+            return True, root_key
+        return False, None
+    except Exception:
+        return False, None
