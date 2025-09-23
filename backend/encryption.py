@@ -8,7 +8,7 @@ import base64
 import hmac
 import os
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Any, Mapping, Dict, Optional, Tuple, TypedDict, cast
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes, hmac as crypto_hmac
@@ -18,6 +18,39 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
 VERSION = "taco-v1"
 HKDF_SALT = b"taco-v1-hkdf-salt"
+
+# typed JSON shapes
+
+
+class KDFParamsDict(TypedDict):
+    name: str
+    n: int
+    r: int
+    p: int
+    length: int
+    salt: str  # urlsafe b64
+
+
+class MasterRecord(TypedDict):
+    version: str
+    username: str
+    kdf: KDFParamsDict
+    verifier: str  # urlsafe b64
+
+
+class EncBlob(TypedDict):
+    nonce: str
+    ciphertext: str
+
+
+class CredentialRecord(TypedDict):
+    site: str
+    account: str
+    enc: EncBlob
+    v: str
+
+
+# helpers
 
 
 def _b64e(b: bytes) -> str:
@@ -33,6 +66,9 @@ def generate_salt(nbytes: int = 16) -> bytes:
     if nbytes < 16:
         raise ValueError("salt must be at least 16 bytes")
     return os.urandom(nbytes)
+
+
+# KDF params
 
 
 @dataclass(frozen=True)
@@ -56,7 +92,7 @@ class KDFParams:
             salt = generate_salt(16)
         return KDFParams(n=n, r=r, p=p, length=length, salt=_b64e(salt))
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> KDFParamsDict:
         return {
             "name": self.name,
             "n": self.n,
@@ -67,15 +103,14 @@ class KDFParams:
         }
 
     @staticmethod
-    def from_dict(d: Dict[str, object]) -> "KDFParams":
-        return KDFParams(
-            name=str(d.get("name", "scrypt")),
-            n=int(d.get("n", 1 << 14)),
-            r=int(d.get("r, ", 8)) if "r, " in d else int(d.get("r", 8)),
-            p=int(d.get("p", 1)),
-            length=int(d.get("length", 32)),
-            salt=str(d["salt"]),
-        )
+    def from_dict(d: Mapping[str, Any]) -> "KDFParams":
+        name = cast(str, d.get("name", "scrypt"))
+        n = int(d.get("n", 1 << 14))
+        r = int(d.get("r", 8))
+        p = int(d.get("p", 1))
+        length = int(d.get("length", 32))
+        salt = cast(str, d["salt"])
+        return KDFParams(name=name, n=n, r=r, p=p, length=length, salt=salt)
 
 
 def derive_root_key(password: str, kdf: KDFParams) -> bytes:
@@ -102,6 +137,9 @@ def _hmac_sha256(key: bytes, msg: bytes) -> bytes:
     h = crypto_hmac.HMAC(key, hashes.SHA256())
     h.update(msg)
     return h.finalize()
+
+
+# master record
 
 
 def make_master_record(
