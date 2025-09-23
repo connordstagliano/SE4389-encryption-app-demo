@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import base64
 import hmac
-import json
 import os
 from dataclasses import dataclass
 from typing import Mapping, Optional, Tuple, TypedDict, cast
@@ -482,62 +481,3 @@ def validate_master_record(record: Mapping[str, object]) -> None:
     if kdf.n < (1 << 14) or kdf.r < 8 or kdf.p < 1 or kdf.length < 32:
         raise ValueError("KDF params too weak")
     _ = _b64d(kdf.salt)  # decode check
-
-
-# demo
-
-if __name__ == "__main__":
-    print("taco demo: creating master record, encrypting and decrypting one password\n")
-
-    username = "demo_user"
-    password = "correct horse battery staple"
-    site = "example.com"
-    account = "demo@example.com"
-    secret_pw = "P@ssw0rd!"
-
-    master = make_master_record(username, password)
-    print("master record JSON:")
-    print(json.dumps(master, indent=2))
-    print()
-
-    ok, root = verify_master(username, password, master)
-    print(f"verify_master -> {ok}")
-    assert ok and root is not None
-
-    enc = encrypt_password(secret_pw, root, site=site, account=account)
-    cred = make_credential_record(site, account, enc)
-    print("credential record JSON:")
-    print(json.dumps(cred, indent=2))
-    print()
-
-    # optional duplicate tag (not stored by default)
-    tag = make_duplicate_tag(secret_pw, root)
-    print("duplicate tag (demo):", tag)
-    print()
-
-    # rotation demo (re-encrypt the single credential under a new master)
-    new_master, new_creds = rotate_master_password(
-        master, username, password, "new master pw", [cred]
-    )
-    print("rotated master JSON (truncated kdf.salt):")
-    truncated_master: dict[str, object] = {**new_master}
-    kdf_src = cast(Mapping[str, object], new_master["kdf"])  # TypedDict -> Mapping
-    kdf_copy: dict[str, object] = {**kdf_src}
-    salt_str = cast(str, kdf_copy["salt"])
-    kdf_copy["salt"] = f"{salt_str[:8]}..."
-    truncated_master["kdf"] = kdf_copy
-
-    print(json.dumps(truncated_master, indent=2))
-    print("rotated credentials count:", len(new_creds))
-    print()
-
-    decrypted = decrypt_password(
-        new_creds[0]["enc"],
-        verify_master(username, "new master pw", new_master)[1],  # type: ignore[index]
-        site=site,
-        account=account,
-    )
-    print("decrypted after rotation:", decrypted)
-    assert decrypted == secret_pw
-
-    print("\nOK.")
