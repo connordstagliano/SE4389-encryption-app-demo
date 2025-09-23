@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import base64
 import hmac
-import json
 import os
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes, hmac as crypto_hmac
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
@@ -136,3 +137,40 @@ def verify_master(
         return False, None
     except Exception:
         return False, None
+
+
+def enc_key_from_root(root_key: bytes) -> bytes:
+    return derive_subkey(root_key, b"enc-key")
+
+
+def encrypt_password(
+    plaintext_password: str, root_key: bytes, *, site: str, account: str
+) -> Dict[str, str]:
+    if plaintext_password == "":
+        raise ValueError("plaintext_password must be a non-empty string")
+    if not site or not account:
+        raise ValueError("site and account are required for AAD binding")
+
+    key = enc_key_from_root(root_key)
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)  # 96-bit nonce
+    aad = f"{site}|{account}".encode("utf-8")
+    ct = aesgcm.encrypt(nonce, plaintext_password.encode("utf-8"), aad)
+    return {"nonce": _b64e(nonce), "ciphertext": _b64e(ct)}
+
+
+def decrypt_password(
+    enc: Dict[str, str], root_key: bytes, *, site: str, account: str
+) -> str:
+    key = enc_key_from_root(root_key)
+    aesgcm = AESGCM(key)
+    nonce = _b64d(enc["nonce"])
+    ct = _b64d(enc["ciphertext"])
+    aad = f"{site}|{account}".encode("utf-8")
+    try:
+        pt = aesgcm.decrypt(nonce, ct, aad)
+        return pt.decode("utf-8")
+    except InvalidTag as e:
+        raise InvalidTag(
+            "decryption failed (wrong credentials or tampered data)"
+        ) from e
