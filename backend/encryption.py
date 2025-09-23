@@ -49,6 +49,8 @@ class CredentialRecord(TypedDict):
     account: str
     enc: EncBlob
     v: str
+    # Optional duplicate detector (urlsafe b64); backend can add/use this if desired:
+    # dup_tag: NotRequired[str]  # Python 3.11+; omit in strict 3.10 typing
 
 
 # helpers
@@ -255,6 +257,61 @@ def decrypt_password(
         ) from e
 
 
+# optional duplicate detector
+
+
+def make_duplicate_tag(plaintext_password: str, root_key: bytes) -> str:
+    """
+    Returns a stable, non-reversible tag for a plaintext password.
+    Use to detect reused passwords without storing the plaintext.
+    """
+    dup_key = derive_subkey(root_key, b"dup-key")
+    tag = _hmac_sha256(dup_key, plaintext_password.encode("utf-8"))
+    return _b64e(tag)
+
+
+# rotation
+
+
+def rotate_master_password(
+    record: Mapping[str, object],
+    username: str,
+    old_password: str,
+    new_password: str,
+    creds: list[CredentialRecord],
+) -> Tuple[MasterRecord, list[CredentialRecord]]:
+    """
+    Re-encrypt all credentials under a new master password and return
+    (new_master_record, new_credentials_list). Operates in memory only.
+    """
+    ok, old_root = verify_master(username, old_password, record)
+    if not ok or old_root is None:
+        raise ValueError("old master credentials invalid")
+
+    new_master = make_master_record(username, new_password)
+    ok2, new_root = verify_master(username, new_password, new_master)
+    assert ok2 and new_root is not None  # should always succeed
+
+    updated: list[CredentialRecord] = []
+    for c in creds:
+        site = c["site"]
+        account = c["account"]
+        pw = decrypt_password(c["enc"], old_root, site=site, account=account)
+        new_enc = encrypt_password(pw, new_root, site=site, account=account)
+        # preserve any extra fields user might have added (like dup_tag) if present
+        new_c: CredentialRecord = {
+            "site": site,
+            "account": account,
+            "enc": new_enc,
+            "v": VERSION,
+        }
+        # if you were storing a dup_tag, recompute it; otherwise omit
+        # new_c["dup_tag"] = make_duplicate_tag(pw, new_root)  # uncomment if you store tags
+        updated.append(new_c)
+
+    return new_master, updated
+
+
 # minimal record helpers
 
 
@@ -269,6 +326,7 @@ def validate_master_record(record: Mapping[str, object]) -> None:
     if version != VERSION:
         raise ValueError("unsupported version")
 
+    # cast + presence checks to satisfy strict typing and keep runtime safety
     try:
         username = cast(str, record["username"])  # type: ignore[index]
         verifier = cast(str, record["verifier"])  # type: ignore[index]
@@ -317,8 +375,31 @@ if __name__ == "__main__":
     print(json.dumps(cred, indent=2))
     print()
 
-    decrypted = decrypt_password(enc, root, site=site, account=account)
-    print("decrypted password:", decrypted)
+    # optional duplicate tag (not stored by default)
+    tag = make_duplicate_tag(secret_pw, root)
+    print("duplicate tag (demo):", tag)
+    print()
+
+    # rotation demo (re-encrypt the single credential under a new master)
+    new_master, new_creds = rotate_master_password(
+        master, username, password, "new master pw", [cred]
+    )
+    print("rotated master JSON (truncated kdf.salt):")
+
+    # Make a typed copy that Pylance understands
+    truncated_master: dict[str, object] = {**new_master}
+    kdf_src = cast(Mapping[str, object], new_master["kdf"])  # TypedDict -> Mapping
+    kdf_copy: dict[str, object] = {**kdf_src}
+    salt_str = cast(str, kdf_copy["salt"])
+    kdf_copy["salt"] = f"{salt_str[:8]}..."
+    truncated_master["kdf"] = kdf_copy
+
+    print(json.dumps(truncated_master, indent=2))
+    print("rotated credentials count:", len(new_creds))
+    print()
+
+    decrypted = decrypt_password(new_creds[0]["enc"], verify_master(username, "new master pw", new_master)[1], site=site, account=account)  # type: ignore[index]
+    print("decrypted after rotation:", decrypted)
     assert decrypted == secret_pw
 
     print("\nOK.")
