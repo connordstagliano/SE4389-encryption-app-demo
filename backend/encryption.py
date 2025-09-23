@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import base64
 import hmac
+import json
 import os
 from dataclasses import dataclass
-from typing import Any, Mapping, Dict, Optional, Tuple, TypedDict, cast
+from typing import Mapping, Optional, Tuple, TypedDict, cast
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes, hmac as crypto_hmac
@@ -68,6 +69,26 @@ def generate_salt(nbytes: int = 16) -> bytes:
     return os.urandom(nbytes)
 
 
+def _coerce_int(value: object, name: str, default: int) -> int:
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            raise TypeError(
+                f"{name} must be an integer or numeric string (got {value!r})"
+            )
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except Exception:
+        raise TypeError(
+            f"{name} must be an integer-like value (got {type(value).__name__})"
+        )
+
+
 # KDF params
 
 
@@ -78,7 +99,7 @@ class KDFParams:
     r: int = 8
     p: int = 1
     length: int = 32
-    salt: str = ""  # b64
+    salt: str = ""  # urlsafe b64
 
     @staticmethod
     def create(
@@ -103,14 +124,16 @@ class KDFParams:
         }
 
     @staticmethod
-    def from_dict(d: Mapping[str, Any]) -> "KDFParams":
-        name = cast(str, d.get("name", "scrypt"))
-        n = int(d.get("n", 1 << 14))
-        r = int(d.get("r", 8))
-        p = int(d.get("p", 1))
-        length = int(d.get("length", 32))
-        salt = cast(str, d["salt"])
-        return KDFParams(name=name, n=n, r=r, p=p, length=length, salt=salt)
+    def from_dict(d: Mapping[str, object]) -> "KDFParams":
+        name = str(d.get("name", "scrypt"))
+        n = _coerce_int(d.get("n"), "kdf.n", 1 << 14)
+        r = _coerce_int(d.get("r"), "kdf.r", 8)
+        p = _coerce_int(d.get("p"), "kdf.p", 1)
+        length = _coerce_int(d.get("length"), "kdf.length", 32)
+        salt_obj = d.get("salt")
+        if not isinstance(salt_obj, str):
+            raise TypeError("kdf.salt must be a url-safe base64 string")
+        return KDFParams(name=name, n=n, r=r, p=p, length=length, salt=salt_obj)
 
 
 def derive_root_key(password: str, kdf: KDFParams) -> bytes:
@@ -118,13 +141,7 @@ def derive_root_key(password: str, kdf: KDFParams) -> bytes:
         raise ValueError("unsupported KDF")
     if kdf.n < (1 << 14) or kdf.r < 8 or kdf.p < 1 or kdf.length < 32:
         raise ValueError("KDF params too weak")
-    kdf_fn = Scrypt(
-        salt=_b64d(kdf.salt),
-        length=kdf.length,
-        n=kdf.n,
-        r=kdf.r,
-        p=kdf.p,
-    )
+    kdf_fn = Scrypt(salt=_b64d(kdf.salt), length=kdf.length, n=kdf.n, r=kdf.r, p=kdf.p)
     return kdf_fn.derive(password.encode("utf-8"))
 
 
@@ -144,7 +161,7 @@ def _hmac_sha256(key: bytes, msg: bytes) -> bytes:
 
 def make_master_record(
     username: str, password: str, kdf: Optional[KDFParams] = None
-) -> Dict[str, object]:
+) -> MasterRecord:
     if not username:
         raise ValueError("username required")
     kdf = kdf or KDFParams.create()
@@ -160,21 +177,38 @@ def make_master_record(
 
 
 def verify_master(
-    username: str, password: str, record: Dict[str, object]
+    username: str, password: str, record: Mapping[str, object]
 ) -> Tuple[bool, Optional[bytes]]:
     try:
-        if record.get("version") != VERSION or record.get("username") != username:
+        version = record.get("version")
+        if version != VERSION:
             return False, None
-        kdf = KDFParams.from_dict(record["kdf"])  # type: ignore[arg-type]
+
+        uname = record.get("username")
+        if not isinstance(uname, str) or uname != username:
+            return False, None
+
+        kdf_raw = record.get("kdf")
+        if not isinstance(kdf_raw, dict):
+            return False, None
+        kdf_map: Mapping[str, object] = cast(Mapping[str, object], kdf_raw)
+        kdf = KDFParams.from_dict(kdf_map)
+
         root_key = derive_root_key(password, kdf)
         auth_key = derive_subkey(root_key, b"auth-key")
-        expected = _b64d(str(record["verifier"]))  # type: ignore[index]
+
+        verifier_b64 = record["verifier"]  # type: ignore[index]
+        expected = _b64d(verifier_b64)  # type: ignore[arg-type]
         actual = _hmac_sha256(auth_key, f"verify|{username}|{VERSION}".encode("utf-8"))
+
         if hmac.compare_digest(expected, actual):
             return True, root_key
         return False, None
     except Exception:
         return False, None
+
+
+# encryption
 
 
 def enc_key_from_root(root_key: bytes) -> bytes:
@@ -183,8 +217,8 @@ def enc_key_from_root(root_key: bytes) -> bytes:
 
 def encrypt_password(
     plaintext_password: str, root_key: bytes, *, site: str, account: str
-) -> Dict[str, str]:
-    if plaintext_password == "":
+) -> EncBlob:
+    if not plaintext_password:
         raise ValueError("plaintext_password must be a non-empty string")
     if not site or not account:
         raise ValueError("site and account are required for AAD binding")
@@ -198,12 +232,19 @@ def encrypt_password(
 
 
 def decrypt_password(
-    enc: Dict[str, str], root_key: bytes, *, site: str, account: str
+    enc: EncBlob,
+    root_key: bytes,
+    *,
+    site: str,
+    account: str,
 ) -> str:
+    nonce_b64 = enc["nonce"]
+    ct_b64 = enc["ciphertext"]
+
     key = enc_key_from_root(root_key)
     aesgcm = AESGCM(key)
-    nonce = _b64d(enc["nonce"])
-    ct = _b64d(enc["ciphertext"])
+    nonce = _b64d(nonce_b64)
+    ct = _b64d(ct_b64)
     aad = f"{site}|{account}".encode("utf-8")
     try:
         pt = aesgcm.decrypt(nonce, ct, aad)
@@ -212,3 +253,72 @@ def decrypt_password(
         raise InvalidTag(
             "decryption failed (wrong credentials or tampered data)"
         ) from e
+
+
+# minimal record helpers
+
+
+def make_credential_record(
+    site: str, account: str, enc_blob: EncBlob
+) -> CredentialRecord:
+    return {"site": site, "account": account, "enc": enc_blob, "v": VERSION}
+
+
+def validate_master_record(record: Mapping[str, object]) -> None:
+    version = record.get("version")
+    if version != VERSION:
+        raise ValueError("unsupported version")
+
+    try:
+        username = cast(str, record["username"])  # type: ignore[index]
+        verifier = cast(str, record["verifier"])  # type: ignore[index]
+    except Exception:
+        raise ValueError("username/verifier missing/invalid")
+
+    if not username:
+        raise ValueError("username missing/invalid")
+    if not verifier:
+        raise ValueError("verifier missing/invalid")
+
+    kdf_raw = record.get("kdf")
+    if not isinstance(kdf_raw, dict):
+        raise ValueError("kdf missing/invalid")
+    kdf_map: Mapping[str, object] = cast(Mapping[str, object], kdf_raw)
+    kdf = KDFParams.from_dict(kdf_map)
+
+    if kdf.n < (1 << 14) or kdf.r < 8 or kdf.p < 1 or kdf.length < 32:
+        raise ValueError("KDF params too weak")
+    _ = _b64d(kdf.salt)  # decode check
+
+
+# demo
+
+if __name__ == "__main__":
+    print("taco demo: creating master record, encrypting and decrypting one password\n")
+
+    username = "demo_user"
+    password = "correct horse battery staple"
+    site = "example.com"
+    account = "demo@example.com"
+    secret_pw = "P@ssw0rd!"
+
+    master = make_master_record(username, password)
+    print("master record JSON:")
+    print(json.dumps(master, indent=2))
+    print()
+
+    ok, root = verify_master(username, password, master)
+    print(f"verify_master -> {ok}")
+    assert ok and root is not None
+
+    enc = encrypt_password(secret_pw, root, site=site, account=account)
+    cred = make_credential_record(site, account, enc)
+    print("credential record JSON:")
+    print(json.dumps(cred, indent=2))
+    print()
+
+    decrypted = decrypt_password(enc, root, site=site, account=account)
+    print("decrypted password:", decrypted)
+    assert decrypted == secret_pw
+
+    print("\nOK.")
