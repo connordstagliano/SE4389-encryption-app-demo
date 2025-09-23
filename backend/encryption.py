@@ -11,6 +11,7 @@ from typing import Dict, Optional
 
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
+
 def _b64e(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
 
@@ -18,6 +19,7 @@ def _b64e(b: bytes) -> str:
 def _b64d(s: str) -> bytes:
     pad = "=" * ((4 - (len(s) % 4)) % 4)
     return base64.urlsafe_b64decode((s + pad).encode("utf-8"))
+
 
 def generate_salt(nbytes: int = 16) -> bytes:
     if nbytes < 16:
@@ -36,14 +38,25 @@ class KDFParams:
 
     @staticmethod
     def create(
-        n: int = 1 << 14, r: int = 8, p: int = 1, length: int = 32, salt: Optional[bytes] = None
+        n: int = 1 << 14,
+        r: int = 8,
+        p: int = 1,
+        length: int = 32,
+        salt: Optional[bytes] = None,
     ) -> "KDFParams":
         if salt is None:
             salt = generate_salt(16)
         return KDFParams(n=n, r=r, p=p, length=length, salt=_b64e(salt))
 
     def to_dict(self) -> Dict[str, object]:
-        return {"name": self.name, "n": self.n, "r": self.r, "p": self.p, "length": self.length, "salt": self.salt}
+        return {
+            "name": self.name,
+            "n": self.n,
+            "r": self.r,
+            "p": self.p,
+            "length": self.length,
+            "salt": self.salt,
+        }
 
     @staticmethod
     def from_dict(d: Dict[str, object]) -> "KDFParams":
