@@ -110,12 +110,12 @@ class CredentialRecord(TypedDict):
 # helpers
 
 
-def _b64e(b: bytes) -> str:
+def b64e(b: bytes) -> str:
     """urlsafe base64 encoder that omits '=' padding."""
     return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
 
 
-def _b64d(s: str) -> bytes:
+def b64d(s: str) -> bytes:
     """urlsafe base64 decoder that tolerates missing '=' padding."""
     pad = "=" * ((4 - (len(s) % 4)) % 4)
     return base64.urlsafe_b64decode((s + pad).encode("utf-8"))
@@ -179,7 +179,7 @@ class KDFParams:
         """Create params with a new random salt (urlsafe b64)."""
         if salt is None:
             salt = generate_salt(16)
-        return KDFParams(n=n, r=r, p=p, length=length, salt=_b64e(salt))
+        return KDFParams(n=n, r=r, p=p, length=length, salt=b64e(salt))
 
     def to_dict(self) -> KDFParamsDict:
         """Serialize params for storage inside a master record."""
@@ -218,7 +218,7 @@ def derive_root_key(password: str, kdf: KDFParams) -> bytes:
         raise ValueError("unsupported KDF")
     if kdf.n < (1 << 14) or kdf.r < 8 or kdf.p < 1 or kdf.length < 32:
         raise ValueError("KDF params too weak")
-    kdf_fn = Scrypt(salt=_b64d(kdf.salt), length=kdf.length, n=kdf.n, r=kdf.r, p=kdf.p)
+    kdf_fn = Scrypt(salt=b64d(kdf.salt), length=kdf.length, n=kdf.n, r=kdf.r, p=kdf.p)
     return kdf_fn.derive(password.encode("utf-8"))
 
 
@@ -265,7 +265,7 @@ def make_master_record(
         "version": VERSION,
         "username": username,
         "kdf": kdf.to_dict(),
-        "verifier": _b64e(verifier),
+        "verifier": b64e(verifier),
     }
 
 
@@ -298,7 +298,7 @@ def verify_master(
 
         # `verifier` is str if created by us; index + cast for Pylance
         verifier_b64 = record["verifier"]  # type: ignore[index]
-        expected = _b64d(verifier_b64)  # type: ignore[arg-type]
+        expected = b64d(verifier_b64)  # type: ignore[arg-type]
         actual = _hmac_sha256(auth_key, f"verify|{username}|{VERSION}".encode("utf-8"))
 
         if hmac.compare_digest(expected, actual):
@@ -337,7 +337,7 @@ def encrypt_password(
     nonce = os.urandom(12)  # 96-bit nonce
     aad = f"{site}|{account}".encode("utf-8")
     ct = aesgcm.encrypt(nonce, plaintext_password.encode("utf-8"), aad)
-    return {"nonce": _b64e(nonce), "ciphertext": _b64e(ct)}
+    return {"nonce": b64e(nonce), "ciphertext": b64e(ct)}
 
 
 def decrypt_password(
@@ -356,8 +356,8 @@ def decrypt_password(
 
     key = enc_key_from_root(root_key)
     aesgcm = AESGCM(key)
-    nonce = _b64d(nonce_b64)
-    ct = _b64d(ct_b64)
+    nonce = b64d(nonce_b64)
+    ct = b64d(ct_b64)
     aad = f"{site}|{account}".encode("utf-8")
     try:
         pt = aesgcm.decrypt(nonce, ct, aad)
@@ -385,7 +385,7 @@ def make_duplicate_tag(plaintext_password: str, root_key: bytes) -> str:
     """
     dup_key = derive_subkey(root_key, b"dup-key")
     tag = _hmac_sha256(dup_key, plaintext_password.encode("utf-8"))
-    return _b64e(tag)
+    return b64e(tag)
 
 
 # rotation
@@ -480,4 +480,4 @@ def validate_master_record(record: Mapping[str, object]) -> None:
 
     if kdf.n < (1 << 14) or kdf.r < 8 or kdf.p < 1 or kdf.length < 32:
         raise ValueError("KDF params too weak")
-    _ = _b64d(kdf.salt)  # decode check
+    _ = b64d(kdf.salt)  # decode check
