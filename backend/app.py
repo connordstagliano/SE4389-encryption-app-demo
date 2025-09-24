@@ -5,6 +5,8 @@ from controllers.user_controller import user_bp
 from controllers.credentials_controller import credentials_bp
 from storage.json_storage import JsonStorage
 from storage.file_session_store import FileSessionStore
+from flask_cors import CORS  # Add this import
+
 
 load_dotenv('./.env')
 
@@ -13,6 +15,9 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 app.config['storage'] = JsonStorage()
 app.config['session_store'] = FileSessionStore()
 app.config['MAX_CONTENT_LENGTH'] = 1024 * 32
+
+# Initialize CORS
+CORS(app)
 
 
 @app.after_request
@@ -28,4 +33,4 @@ app.register_blueprint(user_bp, url_prefix='/auth')
 app.register_blueprint(credentials_bp, url_prefix='/credentials')
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5001)
