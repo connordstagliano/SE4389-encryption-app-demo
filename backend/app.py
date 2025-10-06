@@ -7,7 +7,6 @@ from storage.json_storage import JsonStorage
 from storage.file_session_store import FileSessionStore
 from flask_cors import CORS  # Add this import
 
-
 load_dotenv('./.env')
 
 app = Flask(__name__)
