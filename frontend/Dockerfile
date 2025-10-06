@@ -4,9 +4,10 @@ FROM node:24-alpine
 
 WORKDIR /app
 
-EXPOSE 3000
+COPY package.json ./
 
-ENV NEXT_TELEMETRY_DISABLED=1 \
-    PORT=3000
+RUN npm install
 
-CMD ["sh", "-c", "if [ ! -d node_modules ]; then npm ci; fi; npm run dev"]
+COPY . .
+
+CMD ["npm", "run", "dev"]
