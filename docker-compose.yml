@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-dev-local-secret}
+      - FLASK_APP=app.py
+      - FLASK_RUN_PORT=5001
+      - FLASK_RUN_HOST=0.0.0.0
+    volumes:
+      - ./backend:/app
+    ports:
+      - "5001:5001"
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:5001
+      - NODE_ENV=development
+      - PORT=3000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
