@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import { Shield, Lock, Key, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import Link from "next/link";
 
 export default function Home() {
   const { isAuthenticated, loading } = useAuth();
@@ -55,24 +56,26 @@ export default function Home() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Link href={'/signup'}>
             <Button
               size="lg"
-              onClick={() => router.push("/signup")}
               className="flex items-center space-x-2"
             >
               <Key className="w-5 h-5" />
               <span>Get Started</span>
               <ArrowRight className="w-4 h-4" />
             </Button>
+            </Link>
+            <Link href={'/login'}>
             <Button
               variant="secondary"
               size="lg"
-              onClick={() => router.push("/login")}
               className="flex items-center space-x-2"
             >
               <Lock className="w-5 h-5" />
               <span>Sign In</span>
             </Button>
+            </Link>
           </div>
         </motion.div>
 

@@ -49,15 +49,13 @@ def check_dup():
     if not request.is_json:
         return jsonify(error="Expected application/json"), 400
     data = request.get_json(silent=True)
-    required = ['site', 'account', 'site_password']
+    required = ['site_password']
     if not data or any(k not in data for k in required):
         return jsonify(error="Missing fields"), 400
     if not all(isinstance(data[k], str) for k in required):
         return jsonify(error="Invalid types"), 400
     if any(len(data[k]) == 0 for k in required):
         return jsonify(error="Empty fields not allowed"), 400
-    if len(data['site']) > 512 or len(data['account']) > 512:
-        return jsonify(error="Field length too large"), 400
     if len(data['site_password']) > 4096:
         return jsonify(error="Password too long"), 400
     

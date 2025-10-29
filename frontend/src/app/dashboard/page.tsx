@@ -21,6 +21,7 @@ import {
   Shield,
   Key,
 } from "lucide-react";
+import { CheckDuplicateDialog } from "@/components/ui/Dialog";
 
 function DashboardContent() {
   const { user, logout } = useAuth();
@@ -32,6 +33,7 @@ function DashboardContent() {
     new Set()
   );
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [checkDuplicateDialog, setCheckDuplicateDialog] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -58,17 +60,33 @@ function DashboardContent() {
     }
   };
 
-  const handleAddCredential = async (e: React.FormEvent) => { // button click
+  const handleCheckDuplicate = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError("");
     setFormLoading(true);
 
     try {
-      // First call checkcredentialdup - webview calls data access layer - then calls backend
-      await credentialsAPI.addCredential( 
+      const result = await credentialsAPI.checkDuplicate(
+        formData.site_password,
+      );
+
+      if (result.warning) setCheckDuplicateDialog(result.message);
+      if (!result.warning) await handleAddCredential();
+    } catch (error: any) {
+      setFormError(error.response?.data?.error || "Failed to add credential");
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const handleAddCredential = async () => {
+    setFormLoading(true);
+
+    try {
+      await credentialsAPI.addCredential(
         formData.site,
         formData.account,
-        formData.site_password
+        formData.site_password,
       );
 
       setFormData({ site: "", account: "", site_password: "" });
@@ -121,6 +139,7 @@ function DashboardContent() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <CheckDuplicateDialog msg={checkDuplicateDialog} setMsg={setCheckDuplicateDialog} handleAddCredential={handleAddCredential} />
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -211,7 +230,7 @@ function DashboardContent() {
                   Add New Credential
                 </h2>
 
-                <form onSubmit={handleAddCredential} className="space-y-4">
+                <form onSubmit={handleCheckDuplicate} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Input
                       label="Website/Service"
