@@ -47,6 +47,11 @@ export interface AuthResponse {
   username?: string;
 }
 
+export interface CheckDuplicateResponse {
+  message: string;
+  warning: boolean;
+}
+
 export interface CredentialResponse {
   message?: string;
   site?: string;
@@ -77,6 +82,11 @@ export const authAPI = {
 
 // Credentials API
 export const credentialsAPI = {
+  checkDuplicate: async (sitePassword: string): Promise<CheckDuplicateResponse> => {
+    const response = await api.post('/credentials/check', { site_password: sitePassword });
+    return response.data;
+  },
+
   addCredential: async (site: string, account: string, sitePassword: string): Promise<CredentialResponse> => {
     const response = await api.post('/credentials/', { 
       site, 

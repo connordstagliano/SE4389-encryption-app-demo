@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
 import { Lock, User, ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -129,12 +130,12 @@ export default function LoginPage() {
           >
             <p className="text-sm text-gray-600 dark:text-gray-400">
               Don't have an account?{" "}
-              <button
-                onClick={() => router.push("/signup")}
+              <Link
+                href={'/signup'}
                 className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors"
               >
                 Sign up
-              </button>
+              </Link>
             </p>
           </motion.div>
         </Card>

@@ -60,7 +60,7 @@ export const Button: React.FC<ButtonProps> = ({
           <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
         </motion.div>
       )}
-      <span className={loading ? "opacity-0" : "opacity-100"}>{children}</span>
+      <span className={`flex gap-2 items-center ${loading && "opacity-0"}`}>{children}</span>
     </motion.button>
   );
 };
