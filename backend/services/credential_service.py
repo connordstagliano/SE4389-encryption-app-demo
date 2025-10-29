@@ -21,6 +21,22 @@ def add_credential(storage: AbstractStorage, username: str, root_key: bytes, sit
 
     return cred
 
+def check_credential_dup(storage, username, root_key, site_password):
+    user = storage.get_user(username)
+    warning = False
+    count = 0
+
+    dupCheck = make_duplicate_tag(site_password, root_key)
+    for credential in user.credentials:
+            count += 1
+    if count >= 3:
+        warning = True
+        return "Warning, this password is reused 3 times", warning
+    else:
+        return "None", warning
+
+    return check_credential_dup
+
 def get_credentials(storage: AbstractStorage, username: str, root_key: bytes) -> List[Credential]:
     user = storage.get_user(username)
     if not user:

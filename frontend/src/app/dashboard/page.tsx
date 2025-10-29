@@ -58,13 +58,14 @@ function DashboardContent() {
     }
   };
 
-  const handleAddCredential = async (e: React.FormEvent) => {
+  const handleAddCredential = async (e: React.FormEvent) => { // button click
     e.preventDefault();
     setFormError("");
     setFormLoading(true);
 
     try {
-      await credentialsAPI.addCredential(
+      // First call checkcredentialdup - webview calls data access layer - then calls backend
+      await credentialsAPI.addCredential( 
         formData.site,
         formData.account,
         formData.site_password
